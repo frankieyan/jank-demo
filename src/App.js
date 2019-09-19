@@ -6,6 +6,7 @@ import { Loader } from './loader/loader.component'
 const SideBar = styled.section`
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   position: absolute;
   top: 10px;
   left: 10px;
