@@ -1,7 +1,6 @@
-import React, { useState, useEffect, createRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import styled from 'styled-components'
 import { Button } from './button/button.component'
-import { Loader } from './loader/loader.component'
 
 const SideBar = styled.section`
   display: flex;
@@ -25,30 +24,31 @@ const Canvas = styled.div`
   bottom: 0;
 `
 
-const Element = styled(Loader)`
+const Element = styled.span`
+  display: block;
+  width: 40px;
+  height: 40px;
+  border-radius: 40px;
+  background: #0088bf;
   position: absolute;
   visibility: ${props => props.isProtoType ? 'hidden' : 'visible'};
 `
 
-const incrementor = 10;
-const distance = 3;
-const minimum = 10;
-let maxHeight = 0
-let canvasRefCache = null
-let protoTypeRefCache = null
-let frameCache = null
-
-const createElementIndices = length => new Array(length).fill(null).map((_item, index) => ({ id: index }))
+const elementRefCache = []
 
 function App() {
+  const incrementor = 10;
+  const distance = 3;
+  const minimum = 10;
   const [elements, setElements] = useState([])
-  const canvasRef = createRef()
-  const protoTypeRef = createRef()
-
+  const canvasRef = useRef()
+  const protoTypeRef = useRef()
+  const frameRef = useRef()
+  const optimizedRef = useRef()
   const decrementDisabled = elements.length <= minimum
 
   const cancelElementUpdates = () => {
-    cancelAnimationFrame(frameCache)
+    cancelAnimationFrame(frameRef.current)
   }
 
   const increment = () => {
@@ -65,11 +65,16 @@ function App() {
     requestNewElementUpdates({ newLength: elements.length - incrementor })
   }
 
+  const toggleOptimized = () => {
+    optimizedRef.current = !optimizedRef.current
+  }
+
   const requestNewElementUpdates = ({ newLength = null } = {}) => {
-    const canvasSize = canvasRefCache.getBoundingClientRect()
-    const protoTypeSize = protoTypeRefCache.getBoundingClientRect()
+    const canvasSize = canvasRef.current.getBoundingClientRect()
+    const protoTypeSize = protoTypeRef.current.getBoundingClientRect()
     const maxWidth = Math.floor(canvasSize.width - protoTypeSize.width) / canvasSize.width * 100
-    maxHeight = Math.floor(canvasSize.height - protoTypeSize.height)
+    const maxHeight = Math.floor(canvasSize.height - protoTypeSize.height)
+    const createElementIndices = length => new Array(length).fill(null).map((_item, index) => ({ id: index }))
 
     const createNewElements = newLength => createElementIndices(newLength)
       .map(({ id }) => {
@@ -83,15 +88,31 @@ function App() {
     const createUpdatedElements = previousElements => previousElements
       .map(({ id, top, left, direction }) => {
         const getNewTop = () => {
-          const currentTop = parseInt(top.slice(0, top.indexOf('px')))
-          const newTop = direction === 'down' ? currentTop + distance : currentTop - distance
-          if (newTop < 0) return 0
-          if (newTop > maxHeight) return maxHeight
-          return newTop
+          if (optimizedRef.current) {
+            const currentTop = parseInt(top.slice(0, top.indexOf('px')))
+            const newTop = direction === 'down' ? currentTop + distance : currentTop - distance
+            if (newTop < 0) return 0
+            if (newTop > maxHeight) return maxHeight
+            return newTop
+          } else {
+            const newTop = direction === 'down'
+              ? elementRefCache[id].offsetTop + distance
+              : elementRefCache[id].offsetTop - distance
+            if (newTop < 0) return 0
+            if (newTop > maxHeight) return maxHeight
+            return newTop
+          }
         }
-        const newTop = getNewTop()
-        const newDirection = (newTop === 0) ? 'down' : (newTop === maxHeight) ? 'up' : direction
-        return { id, left, top: `${newTop}px`, direction: newDirection }
+
+        if (optimizedRef.current) {
+          const newTop = getNewTop()
+          const newDirection = (newTop === 0) ? 'down' : (newTop === maxHeight) ? 'up' : direction
+          return { id, left, top: `${newTop}px`, direction: newDirection }
+        } else {
+          elementRefCache[id].style.top = `${getNewTop()}px`
+          const newDirection = (elementRefCache[id].offsetTop === 0) ? 'down' : (elementRefCache[id].offsetTop === maxHeight) ? 'up' : direction
+          return { id, left: elementRefCache[id].offsetLeft, top: elementRefCache[id].style.top, direction: newDirection }
+        }
       })
 
     setElements(previousElements => {
@@ -100,15 +121,13 @@ function App() {
         : createUpdatedElements(previousElements)
     })
 
-    frameCache = requestAnimationFrame(() => {
+    frameRef.current = requestAnimationFrame(() => {
       requestNewElementUpdates()
     })
   }
 
   useEffect(() => {
-    canvasRefCache = canvasRef.current
-    protoTypeRefCache = protoTypeRef.current
-    frameCache = requestAnimationFrame(() => requestNewElementUpdates())
+    frameRef.current = requestAnimationFrame(() => requestNewElementUpdates())
     return cancelElementUpdates
   }, []);
 
@@ -117,14 +136,13 @@ function App() {
       <SideBar>
         <Button onClick={increment}>Add 10</Button>
         <Button onClick={decrement} disabled={decrementDisabled}>Subtract 10</Button>
-        <Button>Stop</Button>
-        <Button>Optimize</Button>
+        <Button onClick={toggleOptimized}>{optimizedRef.current ? 'Un-optimize' : 'Optimize'}</Button>
       </SideBar>
 
       <Canvas ref={canvasRef}>
         <Element ref={protoTypeRef} isProtoType />
         {
-          elements.map(({ id, top, left }) => <Element key={id} style={{ top, left }} />)
+          elements.map(({ id, top, left }) => <Element key={id} style={{ top, left }} ref={ref => elementRefCache[id] = ref} />)
         }
       </Canvas>
     </React.Fragment>
