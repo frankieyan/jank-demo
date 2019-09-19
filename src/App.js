@@ -27,43 +27,88 @@ const Canvas = styled.div`
 const Element = styled(Loader)`
   position: absolute;
   visibility: ${props => props.isProtoType ? 'hidden' : 'visible'};
-  top: ${props => props.top || 'auto'};
-  left: ${props => props.left || 'auto'};
 `
 
 const incrementor = 10;
 const distance = 3;
 const minimum = 10;
 let maxHeight = 0
+let canvasRefCache = null
+let protoTypeRefCache = null
+let frameCache = null
 
 const createElementIndices = length => new Array(length).fill(null).map((_item, index) => ({ id: index }))
 
 function App() {
-  const [elements, setElements] = useState(createElementIndices(minimum))
+  const [elements, setElements] = useState([])
   const canvasRef = createRef()
   const protoTypeRef = createRef()
 
   const decrementDisabled = elements.length <= minimum
-  const increment = () => setInitialElements(elements.length + incrementor)
-  const decrement = () => !decrementDisabled && setInitialElements(elements.length - incrementor)
 
-  const setInitialElements = (length = null) => {
-    const canvasSize = canvasRef.current.getBoundingClientRect()
-    const protoTypeSize = protoTypeRef.current.getBoundingClientRect()
+  const cancelElementUpdates = () => {
+    cancelAnimationFrame(frameCache)
+  }
+
+  const increment = () => {
+    cancelElementUpdates()
+    requestNewElementUpdates({ newLength: elements.length + incrementor })
+  }
+
+  const decrement = () => {
+    if (decrementDisabled) {
+      return
+    }
+
+    cancelElementUpdates()
+    requestNewElementUpdates({ newLength: elements.length - incrementor })
+  }
+
+  const requestNewElementUpdates = ({ newLength = null } = {}) => {
+    const canvasSize = canvasRefCache.getBoundingClientRect()
+    const protoTypeSize = protoTypeRefCache.getBoundingClientRect()
     const maxWidth = Math.floor(canvasSize.width - protoTypeSize.width) / canvasSize.width * 100
     maxHeight = Math.floor(canvasSize.height - protoTypeSize.height)
 
-    setElements(createElementIndices(length || elements.length).map(({ id }) => {
-      const top = Math.floor(Math.random() * (maxHeight))
-      const direction = top === maxHeight ? 'up' : 'down'
-      const left = `${(id / (elements.length / maxWidth))}vw`
+    const createNewElements = newLength => createElementIndices(newLength)
+      .map(({ id }) => {
+        const top = Math.floor(Math.random() * (maxHeight))
+        const direction = top === maxHeight ? 'up' : 'down'
+        const left = `${(id / (newLength / maxWidth))}vw`
 
-      return { id, top: `${top}px`, left, direction }
-    }))
+        return { id, top: `${top}px`, left, direction }
+      })
+
+    const createUpdatedElements = previousElements => previousElements
+      .map(({ id, top, left, direction }) => {
+        const getNewTop = () => {
+          const currentTop = parseInt(top.slice(0, top.indexOf('px')))
+          const newTop = direction === 'down' ? currentTop + distance : currentTop - distance
+          if (newTop < 0) return 0
+          if (newTop > maxHeight) return maxHeight
+          return newTop
+        }
+        const newTop = getNewTop()
+        const newDirection = (newTop === 0) ? 'down' : (newTop === maxHeight) ? 'up' : direction
+        return { id, left, top: `${newTop}px`, direction: newDirection }
+      })
+
+    setElements(previousElements => {
+      return (typeof newLength === 'number' || previousElements.length === 0)
+        ? createNewElements(typeof newLength === 'number' ? newLength : minimum)
+        : createUpdatedElements(previousElements)
+    })
+
+    frameCache = requestAnimationFrame(() => {
+      requestNewElementUpdates()
+    })
   }
 
   useEffect(() => {
-    setInitialElements()
+    canvasRefCache = canvasRef.current
+    protoTypeRefCache = protoTypeRef.current
+    frameCache = requestAnimationFrame(() => requestNewElementUpdates())
+    return cancelElementUpdates
   }, []);
 
   return (
@@ -78,7 +123,7 @@ function App() {
       <Canvas ref={canvasRef}>
         <Element ref={protoTypeRef} isProtoType />
         {
-          elements.map(({ id, top, left }) => <Element key={id} top={top} left={left} />)
+          elements.map(({ id, top, left }) => <Element key={id} style={{ top, left }} />)
         }
       </Canvas>
     </React.Fragment>
